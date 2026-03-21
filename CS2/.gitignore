@@ -1,0 +1,16 @@
+# Virtual environment
+venv/
+
+# PyInstaller build folders
+build/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# PyInstaller spec file
+*.spec
+
+# Optional: system files
+.DS_Store
+Thumbs.db
