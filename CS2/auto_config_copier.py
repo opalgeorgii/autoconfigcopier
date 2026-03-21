@@ -1,6 +1,7 @@
 import os
 import shutil
 import platform
+import sys
 from pathlib import Path
 import winreg  # built-in Windows registry module
 import vdf
@@ -95,10 +96,18 @@ vcfg_files = [
 ]
 
 # -----------------------------
-# Source folders
+# Determine source folder (cfg files)
+# Works for .exe in dist/ or .py in cs2/
 # -----------------------------
 
-cfg_src_folder = os.path.join(Path().absolute(), "cfg")
+if getattr(sys, 'frozen', False):
+    # Running as .exe inside dist/
+    base_folder = Path(sys.executable).parent.parent  # go up from dist/
+else:
+    # Running as Python script in project root
+    base_folder = Path(__file__).parent
+
+cfg_src_folder = base_folder / "cfg"
 
 # -----------------------------
 # Copy cfg files to game folder
