@@ -1,1 +1,0 @@
-+exec run_execs -novid -freq 240 -tickrate 128 -no-browser -rate 786432

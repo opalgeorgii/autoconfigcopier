@@ -1,0 +1,9 @@
+{
+    "<your_username>": {
+        "identity": "<your_steamID>",
+        "flags": [
+            "@css/generic",
+            "@css/rcon"
+        ]
+    }
+}

@@ -1,0 +1,10 @@
+{
+  "ColorR": 255,
+  "ColorG": 0,
+  "ColorB": 128,
+  "CommandPermission": "@css/generic",
+  "RconPermission": "@css/rcon",
+  "WallhackEnabled": true,
+  "InvisibleEnabled": true,
+  "ConfigVersion": 1
+}

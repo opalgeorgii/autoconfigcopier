@@ -1,0 +1,10 @@
+.venv/
+build/
+dist/
+/release/CS2ConfigCopier.exe
+CS2ConfigCopier.spec
+
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
