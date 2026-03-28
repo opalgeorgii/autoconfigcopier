@@ -769,107 +769,105 @@ class App(tk.Tk):
                 pass
 
         self._build_ui()
+        self.update_idletasks()
+        self.geometry(f"{self.winfo_reqwidth()}x{self.winfo_reqheight()}")
 
     def _build_ui(self) -> None:
-        root = ttk.Frame(self, padding=16)
+        root = ttk.Frame(self, padding=10)
         root.grid(sticky="nsew")
 
-        title = ttk.Label(root, text=APP_TITLE, font=("Segoe UI", 13, "bold"))
-        title.grid(row=0, column=0, columnspan=2, sticky="w")
+        title = ttk.Label(root, text=APP_TITLE, font=("Segoe UI", 12, "bold"))
+        title.grid(row=0, column=0, sticky="w")
 
         red_warning = tk.Label(
             root,
-            text="Close the Steam before executing",
+            text="Close Steam before executing",
             fg="red",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             anchor="w",
             justify="left",
         )
-        red_warning.grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 2))
+        red_warning.grid(row=1, column=0, sticky="w", pady=(6, 1))
 
         yellow_warning = tk.Label(
             root,
             text="Make sure CS2/CS:GO are installed",
             fg="#b8860b",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             anchor="w",
             justify="left",
         )
-        yellow_warning.grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        yellow_warning.grid(row=2, column=0, sticky="w", pady=(0, 8))
 
-        cs2_frame = ttk.LabelFrame(root, text="CS2", padding=12)
-        cs2_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        cs2_frame = ttk.LabelFrame(root, text="CS2", padding=8)
+        cs2_frame.grid(row=3, column=0, sticky="ew", pady=(0, 6))
 
         cs2_text = ttk.Label(
             cs2_frame,
-            text=(
-                "Copies files from cs2_cfg/ into their respective CS2 directories"
-            ),
-            wraplength=650,
+            text="Copies files from cs2_cfg/ into their respective CS2 directories",
+            wraplength=300,
             justify="left",
         )
-        cs2_text.grid(row=0, column=0, sticky="w", pady=(0, 10))
+        cs2_text.grid(row=0, column=0, sticky="w", pady=(0, 6))
 
         cs2_button = ttk.Button(cs2_frame, text="Copy cs2_cfg", command=self.on_install_cs2)
         cs2_button.grid(row=1, column=0, sticky="w")
 
-        csgo_frame = ttk.LabelFrame(root, text="CS:GO", padding=12)
-        csgo_frame.grid(row=4, column=0, sticky="nsew", pady=(0, 0), padx=(0, 8))
+        csgo_frame = ttk.LabelFrame(root, text="CS:GO", padding=8)
+        csgo_frame.grid(row=4, column=0, sticky="ew", pady=(0, 6))
 
         csgo_text = ttk.Label(
             csgo_frame,
-            text=(
-                "Copies csgo_cfg/ into their respective CS:GO directories"
-            ),
-            wraplength=310,
+            text="Copies csgo_cfg/ into their respective CS:GO directories",
+            wraplength=300,
             justify="left",
         )
-        csgo_text.grid(row=0, column=0, sticky="w", pady=(0, 10))
+        csgo_text.grid(row=0, column=0, sticky="w", pady=(0, 6))
 
         csgo_button = ttk.Button(csgo_frame, text="Copy csgo_cfg", command=self.on_install_csgo)
         csgo_button.grid(row=1, column=0, sticky="w")
 
-        server_frame = ttk.LabelFrame(root, text="CS2 Server", padding=12)
-        server_frame.grid(row=4, column=1, sticky="nsew", pady=(0, 0), padx=(8, 0))
+        server_frame = ttk.LabelFrame(root, text="CS2 Server", padding=8)
+        server_frame.grid(row=5, column=0, sticky="ew")
 
         server_notice = tk.Label(
             server_frame,
             text="Server installation folder (pick server/)",
             fg="red",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             anchor="w",
             justify="left",
         )
-        server_notice.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        server_notice.grid(row=0, column=0, sticky="w", pady=(0, 6))
 
         server_path_label = ttk.Label(server_frame, text="Server folder:")
-        server_path_label.grid(row=1, column=0, columnspan=2, sticky="w")
+        server_path_label.grid(row=1, column=0, sticky="w")
 
-        server_path_entry = ttk.Entry(server_frame, textvariable=self.server_dir_var, width=42)
-        server_path_entry.grid(row=2, column=0, sticky="ew", padx=(0, 8), pady=(4, 8))
+        server_path_row = ttk.Frame(server_frame)
+        server_path_row.grid(row=2, column=0, sticky="ew", pady=(3, 6))
 
-        browse_button = ttk.Button(server_frame, text="Choose dir", command=self.on_browse_server_folder)
-        browse_button.grid(row=2, column=1, sticky="ew", pady=(4, 8))
+        server_path_entry = ttk.Entry(server_path_row, textvariable=self.server_dir_var, width=34)
+        server_path_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        browse_button = ttk.Button(server_path_row, text="Choose dir", command=self.on_browse_server_folder)
+        browse_button.grid(row=0, column=1)
 
         server_text = ttk.Label(
             server_frame,
-            text=(
-                "Copies cs2_server_cfg/ into their respective server directories"
-            ),
-            wraplength=310,
+            text="Copies cs2_server_cfg/ into their respective server directories",
+            wraplength=300,
             justify="left",
         )
-        server_text.grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        server_text.grid(row=3, column=0, sticky="w", pady=(0, 6))
 
         server_button = ttk.Button(server_frame, text="Copy cs2_server_cfg", command=self.on_install_server)
         server_button.grid(row=4, column=0, sticky="w")
 
         root.columnconfigure(0, weight=1)
-        root.columnconfigure(1, weight=1)
         cs2_frame.columnconfigure(0, weight=1)
         csgo_frame.columnconfigure(0, weight=1)
         server_frame.columnconfigure(0, weight=1)
-        server_frame.columnconfigure(1, weight=0)
+        server_path_row.columnconfigure(0, weight=1)
 
     def on_browse_server_folder(self) -> None:
         selected = filedialog.askdirectory(title="Select the server folder", mustexist=True)
