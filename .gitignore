@@ -1,7 +1,9 @@
 venv/
 build/
 dist/
-
+steam_account_settings/
+730/
+4465480/
 
 __pycache__/
 .DS_Store

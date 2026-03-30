@@ -14,6 +14,8 @@ CSGO_APP_ID = "4465480"
 CS2_INSTALL_FALLBACK_DIRS = ("Counter-Strike Global Offensive",)
 CSGO_INSTALL_FALLBACK_DIRS = ("csgo legacy",)
 CSGO_VIDEO_EXTENSIONS = {".webm", ".web"}
+STEAM_SETTINGS_FILE_NAME = "localconfig.vdf"
+STEAM_WARNING_COLOR = "#c97a00"
 
 
 class CopierError(Exception):
@@ -73,8 +75,29 @@ def has_any_files(folder: Path) -> bool:
     return folder.exists() and folder.is_dir() and any(p.is_file() for p in folder.rglob("*"))
 
 
+def get_required_file(file_path: Path, description: str) -> Path:
+    if file_path.exists() and file_path.is_file():
+        return file_path
+    raise_error(f"{description} was not found:\n{file_path}")
+
+
+def remove_existing_path(path: Path, log_lines: list[str]) -> None:
+    if not path.exists():
+        return
+
+    try:
+        if path.is_dir():
+            shutil.rmtree(path)
+            log_lines.append(f"REMOVED DIR: {path}")
+        else:
+            path.unlink()
+            log_lines.append(f"REMOVED FILE: {path}")
+    except Exception as e:
+        raise_error(f"Failed to remove existing path:\n{path}\n{e}")
+
+
 # -----------------------------
-# Minimal VDF reader/writer
+# Minimal VDF reader
 # -----------------------------
 
 def _vdf_tokenize(text: str) -> list[str]:
@@ -180,53 +203,12 @@ def read_vdf_file(file_path: Path) -> OrderedDict:
     return parse_vdf_text(text)
 
 
-def _escape_vdf_string(value: object) -> str:
-    return str(value).replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _dump_vdf_mapping(mapping: OrderedDict | dict, indent: int = 0) -> list[str]:
-    lines: list[str] = []
-    tabs = "\t" * indent
-
-    for key, value in mapping.items():
-        lines.append(f'{tabs}"{_escape_vdf_string(key)}"')
-        if isinstance(value, dict):
-            lines.append(f"{tabs}{{")
-            lines.extend(_dump_vdf_mapping(value, indent + 1))
-            lines.append(f"{tabs}}}")
-        else:
-            lines[-1] = f'{tabs}"{_escape_vdf_string(key)}"\t\t"{_escape_vdf_string(value)}"'
-
-    return lines
-
-
-def write_vdf_file(file_path: Path, data: OrderedDict | dict) -> None:
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    contents = "\n".join(_dump_vdf_mapping(data)) + "\n"
-    file_path.write_text(contents, encoding="utf-8")
-
-
 def _find_existing_key_ci(mapping: OrderedDict | dict, wanted_key: str) -> str | None:
     wanted_lower = wanted_key.lower()
     for existing_key in mapping.keys():
         if str(existing_key).lower() == wanted_lower:
             return str(existing_key)
     return None
-
-
-def get_or_create_nested_mapping(root: OrderedDict, keys: list[str]) -> OrderedDict:
-    current: OrderedDict = root
-
-    for key in keys:
-        existing_key = _find_existing_key_ci(current, key)
-        actual_key = existing_key if existing_key is not None else key
-
-        if actual_key not in current or not isinstance(current[actual_key], dict):
-            current[actual_key] = OrderedDict()
-
-        current = current[actual_key]  # type: ignore[assignment]
-
-    return current
 
 
 # -----------------------------
@@ -253,6 +235,10 @@ def get_steam_path() -> Path:
                 continue
 
     raise_error("Steam was not found in the Windows registry.")
+
+
+def get_userdata_folder(steam_path: Path) -> Path:
+    return steam_path / "userdata"
 
 
 def get_library_folders(steam_path: Path) -> list[Path]:
@@ -299,11 +285,33 @@ def get_library_folders(steam_path: Path) -> list[Path]:
 
 
 def get_user_folders(steam_path: Path) -> list[Path]:
-    userdata_folder = steam_path / "userdata"
+    userdata_folder = get_userdata_folder(steam_path)
     if not userdata_folder.exists():
         raise_error(f"Steam userdata folder was not found:\n{userdata_folder}")
 
     return [p for p in userdata_folder.iterdir() if p.is_dir() and p.name.isdigit()]
+
+
+def get_user_ids_from_userdata(steam_path: Path) -> list[str]:
+    user_folders = get_user_folders(steam_path)
+    return sorted((folder.name for folder in user_folders), key=lambda value: int(value))
+
+
+def get_target_user_folders(steam_path: Path, log_lines: list[str]) -> list[Path]:
+    user_folders = get_user_folders(steam_path)
+    log_lines.append(f"Using userdata folders directly: {len(user_folders)}")
+    return user_folders
+
+
+def get_selected_user_folder(steam_path: Path, user_id: str) -> Path:
+    if not user_id or not user_id.isdigit():
+        raise_error("Please choose a primary Steam account first.")
+
+    user_folder = get_userdata_folder(steam_path) / user_id
+    if not user_folder.exists() or not user_folder.is_dir():
+        raise_error(f"The selected Steam account was not found:\n{user_folder}")
+
+    return user_folder
 
 
 def find_installed_app_dir(library_folders: list[Path], app_id: str, fallback_dir_names: tuple[str, ...]) -> Path:
@@ -379,44 +387,23 @@ def copy_tree_files(src_root: Path, dst_root: Path, log_lines: list[str]) -> tup
     return copied, failed
 
 
-def copy_cs2_default_configs(default_configs_folder: Path, app_folder: Path, log_lines: list[str]) -> tuple[int, int]:
-    if not default_configs_folder.exists() or not default_configs_folder.is_dir():
-        log_lines.append(f"SKIPPED missing folder: {default_configs_folder}")
-        return 0, 0
+def copy_app_folder_to_users(source_app_folder: Path, user_folders: list[Path], log_lines: list[str]) -> tuple[int, int, int]:
+    if not source_app_folder.exists() or not source_app_folder.is_dir():
+        log_lines.append(f"SKIPPED missing app folder: {source_app_folder}")
+        return 0, 0, 0
 
     copied = 0
     failed = 0
+    users_processed = 0
 
-    renamed_remote_files = {
-        Path("cs2_user_convars_0_slot0.vcfg"): app_folder / "remote" / "cs2_user_convars.vcfg",
-        Path("cs2_user_keys_0_slot0.vcfg"): app_folder / "remote" / "cs2_user_keys.vcfg",
-    }
-
-    for src_file in default_configs_folder.rglob("*"):
-        if not src_file.is_file():
-            continue
-
-        relative_path = src_file.relative_to(default_configs_folder)
-        dst_file = renamed_remote_files.get(relative_path, app_folder / "local" / "cfg" / relative_path)
-        c, f = copy_file(src_file, dst_file, log_lines)
+    for user_folder in user_folders:
+        dst_app_folder = user_folder / source_app_folder.name
+        c, f = copy_tree_files(source_app_folder, dst_app_folder, log_lines)
         copied += c
         failed += f
+        users_processed += 1
 
-    return copied, failed
-
-
-def backup_file(file_path: Path, log_lines: list[str]) -> tuple[int, int]:
-    if not file_path.exists():
-        return 0, 0
-
-    backup_path = file_path.with_name(file_path.name + ".bak")
-    try:
-        shutil.copy2(file_path, backup_path)
-        log_lines.append(f"BACKUP: {file_path} -> {backup_path}")
-        return 1, 0
-    except Exception as e:
-        log_lines.append(f"FAILED BACKUP: {file_path} -> {backup_path} | {e}")
-        return 0, 1
+    return copied, failed, users_processed
 
 
 def copy_plugin_files(source_plugins_root: Path, server_folder: Path, log_lines: list[str]) -> tuple[int, int, int]:
@@ -469,36 +456,192 @@ def validate_server_folder(server_folder: Path) -> Path:
 
 
 # -----------------------------
-# Launch options patching
+# Steam exports / snapshots
 # -----------------------------
 
-def set_launch_options_for_user(user_folder: Path, app_id: str, launch_options: str, log_lines: list[str]) -> tuple[int, int]:
-    config_folder = user_folder / "config"
-    localconfig_path = config_folder / "localconfig.vdf"
+def load_steam_account_ids() -> list[str]:
+    steam_path = get_steam_path()
+    return get_user_ids_from_userdata(steam_path)
 
-    try:
-        if localconfig_path.exists():
-            data = read_vdf_file(localconfig_path)
-        else:
-            data = OrderedDict()
-            log_lines.append(f"CREATED new localconfig.vdf structure for user: {user_folder.name}")
 
-        app_mapping = get_or_create_nested_mapping(
-            data,
-            ["UserLocalConfigStore", "Software", "Valve", "Steam", "apps", app_id],
+def export_all_steam_settings() -> str:
+    base_folder = get_base_folder()
+    log_file = get_log_file_path(base_folder)
+    steam_path = get_steam_path()
+    user_folders = get_user_folders(steam_path)
+    export_root = base_folder / "steam_account_settings"
+
+    if not user_folders:
+        raise_error(f"No Steam account folders were found in:\n{get_userdata_folder(steam_path)}")
+
+    log_lines = [
+        f"Base folder: {base_folder}",
+        f"Steam path: {steam_path}",
+        f"Userdata folder: {get_userdata_folder(steam_path)}",
+        f"Export folder: {export_root}",
+        f"Steam accounts found: {len(user_folders)}",
+    ]
+
+    remove_existing_path(export_root, log_lines)
+
+    copied = 0
+    failed = 0
+    missing = 0
+
+    for user_folder in user_folders:
+        src_file = user_folder / "config" / STEAM_SETTINGS_FILE_NAME
+        dst_file = export_root / user_folder.name / "config" / STEAM_SETTINGS_FILE_NAME
+
+        if not src_file.exists() or not src_file.is_file():
+            missing += 1
+            log_lines.append(f"SKIPPED missing file: {src_file}")
+            continue
+
+        c, f = copy_file(src_file, dst_file, log_lines)
+        copied += c
+        failed += f
+
+    log_lines.extend([
+        f"Steam settings copied: {copied}",
+        f"Steam settings missing: {missing}",
+        f"Steam settings failed: {failed}",
+    ])
+    write_log(log_file, "Steam Settings Export", log_lines)
+
+    if copied == 0:
+        raise_error(
+            "No Steam settings files were found to copy.\n\n"
+            f"Expected file:\n{STEAM_SETTINGS_FILE_NAME}\n\n"
+            f"See log:\n{log_file}"
         )
-        app_mapping["LaunchOptions"] = launch_options
 
-        _, backup_failed = backup_file(localconfig_path, log_lines)
-        if backup_failed:
-            return 0, 1
+    return "\n".join([
+        "Copy all Steam settings completed.",
+        f"Steam accounts found: {len(user_folders)}",
+        f"Settings copied: {copied}",
+        f"Missing settings files: {missing}",
+        f"Failed copies: {failed}",
+        f"Saved to: {export_root}",
+        f"Log file: {log_file}",
+    ])
 
-        write_vdf_file(localconfig_path, data)
-        log_lines.append(f"UPDATED LaunchOptions for app {app_id}: {localconfig_path}")
-        return 1, 0
-    except Exception as e:
-        log_lines.append(f"FAILED LaunchOptions update: {localconfig_path} | {e}")
-        return 0, 1
+
+def import_all_steam_settings() -> str:
+    base_folder = get_base_folder()
+    log_file = get_log_file_path(base_folder)
+    steam_path = get_steam_path()
+    userdata_folder = get_userdata_folder(steam_path)
+    import_root = base_folder / "steam_account_settings"
+
+    if not import_root.exists() or not import_root.is_dir():
+        raise_error(f"Saved Steam settings folder was not found:\n{import_root}")
+
+    saved_user_folders = [
+        folder for folder in import_root.iterdir()
+        if folder.is_dir() and folder.name.isdigit()
+    ]
+    saved_user_folders.sort(key=lambda folder: int(folder.name))
+
+    if not saved_user_folders:
+        raise_error(f"No saved Steam account settings were found in:\n{import_root}")
+
+    log_lines = [
+        f"Base folder: {base_folder}",
+        f"Steam path: {steam_path}",
+        f"Userdata folder: {userdata_folder}",
+        f"Import folder: {import_root}",
+        f"Saved Steam accounts found: {len(saved_user_folders)}",
+    ]
+
+    copied = 0
+    failed = 0
+    missing = 0
+
+    for saved_user_folder in saved_user_folders:
+        src_file = saved_user_folder / "config" / STEAM_SETTINGS_FILE_NAME
+        dst_file = userdata_folder / saved_user_folder.name / "config" / STEAM_SETTINGS_FILE_NAME
+
+        if not src_file.exists() or not src_file.is_file():
+            missing += 1
+            log_lines.append(f"SKIPPED missing file: {src_file}")
+            continue
+
+        c, f = copy_file(src_file, dst_file, log_lines)
+        copied += c
+        failed += f
+
+    log_lines.extend([
+        f"Steam settings pasted: {copied}",
+        f"Steam settings missing: {missing}",
+        f"Steam settings failed: {failed}",
+    ])
+    write_log(log_file, "Steam Settings Import", log_lines)
+
+    if copied == 0:
+        raise_error(
+            "No Steam settings files were pasted.\n\n"
+            f"Expected file:\n{STEAM_SETTINGS_FILE_NAME}\n\n"
+            f"See log:\n{log_file}"
+        )
+
+    return "\n".join([
+        "Paste all Steam settings completed.",
+        f"Saved Steam accounts found: {len(saved_user_folders)}",
+        f"Settings pasted: {copied}",
+        f"Missing settings files: {missing}",
+        f"Failed copies: {failed}",
+        f"Source folder: {import_root}",
+        f"Log file: {log_file}",
+    ])
+
+
+def export_selected_user_app_settings(app_id: str, config_root_name: str, selected_user_id: str, game_name: str) -> str:
+    base_folder = get_base_folder()
+    log_file = get_log_file_path(base_folder)
+    steam_path = get_steam_path()
+    user_folder = get_selected_user_folder(steam_path, selected_user_id)
+    source_app_folder = user_folder / app_id
+    destination_folder = base_folder / config_root_name / "default_configs" / app_id
+
+    if not source_app_folder.exists() or not source_app_folder.is_dir():
+        raise_error(f"{game_name} is not installed.")
+
+    log_lines = [
+        f"Base folder: {base_folder}",
+        f"Steam path: {steam_path}",
+        f"Selected Steam account: {selected_user_id}",
+        f"Source folder: {source_app_folder}",
+        f"Destination folder: {destination_folder}",
+    ]
+
+    remove_existing_path(destination_folder, log_lines)
+    copied, failed = copy_tree_files(source_app_folder, destination_folder, log_lines)
+
+    log_lines.extend([
+        f"Files copied: {copied}",
+        f"Failed copies: {failed}",
+    ])
+    write_log(log_file, f"{game_name} Current Settings Export", log_lines)
+
+    if copied == 0 and failed == 0:
+        raise_error(f"No {game_name} files were copied.\n\nSee log:\n{log_file}")
+
+    return "\n".join([
+        f"Copy current {game_name} settings completed.",
+        f"Primary Steam account: {selected_user_id}",
+        f"Files copied: {copied}",
+        f"Failed copies: {failed}",
+        f"Saved to: {destination_folder}",
+        f"Log file: {log_file}",
+    ])
+
+
+def copy_current_cs2_settings(selected_user_id: str) -> str:
+    return export_selected_user_app_settings(CS2_APP_ID, "cs2_cfg", selected_user_id, "CS2")
+
+
+def copy_current_csgo_settings(selected_user_id: str) -> str:
+    return export_selected_user_app_settings(CSGO_APP_ID, "csgo_cfg", selected_user_id, "CS:GO")
 
 
 # -----------------------------
@@ -511,74 +654,67 @@ def install_cs2_configs() -> str:
     cs2_cfg_root = get_source_folder(base_folder, "cs2_cfg")
 
     default_configs_folder = cs2_cfg_root / "default_configs"
+    source_user_app_folder = default_configs_folder / CS2_APP_ID
     additional_configs_folder = cs2_cfg_root / "additional_configs"
 
-    if not has_any_files(default_configs_folder) and not has_any_files(additional_configs_folder):
+    if not has_any_files(source_user_app_folder) and not has_any_files(additional_configs_folder):
         raise_error(
             "No files were found in cs2_cfg.\n\n"
-            f"Checked:\n{default_configs_folder}\n{additional_configs_folder}"
+            f"Checked:\n{source_user_app_folder}\n{additional_configs_folder}"
         )
 
     log_lines = [
         f"Base folder: {base_folder}",
         f"CS2 cfg root: {cs2_cfg_root}",
-        f"Default configs folder: {default_configs_folder}",
+        f"Source 730 folder: {source_user_app_folder}",
         f"Additional configs folder: {additional_configs_folder}",
     ]
 
     steam_path = get_steam_path()
     library_folders = get_library_folders(steam_path)
-    cs2_install_dir = find_cs2_install_dir(library_folders)
-    user_folders = get_user_folders(steam_path)
-
-    cs2_cfg_destination = cs2_install_dir / "game" / "csgo" / "cfg"
+    user_folders = get_target_user_folders(steam_path, log_lines)
 
     log_lines.extend([
         f"Steam path: {steam_path}",
-        f"CS2 install dir: {cs2_install_dir}",
-        f"CS2 cfg destination: {cs2_cfg_destination}",
-        f"Steam user folders found: {len(user_folders)}",
+        f"Steam target user folders: {len(user_folders)}",
     ])
 
     total_copied = 0
     total_failed = 0
     users_processed = 0
-    users_skipped = 0
+
+    cs2_install_dir = find_cs2_install_dir(library_folders)
+    cs2_cfg_destination = cs2_install_dir / "game" / "csgo" / "cfg"
+
+    log_lines.extend([
+        f"CS2 install dir: {cs2_install_dir}",
+        f"CS2 cfg destination: {cs2_cfg_destination}",
+    ])
 
     c, f = copy_tree_files(additional_configs_folder, cs2_cfg_destination, log_lines)
     total_copied += c
     total_failed += f
 
-    for user_folder in user_folders:
-        app_folder = user_folder / CS2_APP_ID
-        if not app_folder.exists():
-            users_skipped += 1
-            log_lines.append(f"SKIPPED USER (no {CS2_APP_ID} folder): {user_folder}")
-            continue
-
-        c, f = copy_cs2_default_configs(default_configs_folder, app_folder, log_lines)
-        total_copied += c
-        total_failed += f
-        users_processed += 1
+    c, f, users_processed = copy_app_folder_to_users(source_user_app_folder, user_folders, log_lines)
+    total_copied += c
+    total_failed += f
 
     log_lines.extend([
         f"Users processed: {users_processed}",
-        f"Users skipped: {users_skipped}",
         f"Files copied: {total_copied}",
         f"Failed copies: {total_failed}",
     ])
 
-    write_log(log_file, "CS2 Config Copy", log_lines)
+    write_log(log_file, "CS2 Config Paste", log_lines)
 
     if total_copied == 0 and total_failed == 0:
-        raise_error(f"No CS2 files were copied.\n\nSee log:\n{log_file}")
+        raise_error(f"No CS2 files were pasted.\n\nSee log:\n{log_file}")
 
     return "\n".join([
-        "Copy cs2_cfg completed.",
+        "Paste cs2_cfg completed.",
         f"Files copied: {total_copied}",
         f"Failed copies: {total_failed}",
         f"Users processed: {users_processed}",
-        f"Users skipped: {users_skipped}",
         f"Log file: {log_file}",
     ])
 
@@ -589,61 +725,53 @@ def install_csgo_configs() -> str:
     csgo_cfg_root = get_source_folder(base_folder, "csgo_cfg")
 
     default_configs_folder = csgo_cfg_root / "default_configs"
+    source_user_app_folder = default_configs_folder / CSGO_APP_ID
     additional_configs_folder = csgo_cfg_root / "additional_configs"
-    launch_options_file = csgo_cfg_root / "launch_options.txt"
     video_files = [
         file_path for file_path in csgo_cfg_root.iterdir()
         if file_path.is_file() and file_path.suffix.lower() in CSGO_VIDEO_EXTENSIONS
     ]
 
     if (
-        not has_any_files(default_configs_folder)
+        not has_any_files(source_user_app_folder)
         and not has_any_files(additional_configs_folder)
-        and not launch_options_file.exists()
         and not video_files
     ):
         raise_error(
             "No files were found in csgo_cfg.\n\n"
-            f"Checked:\n{default_configs_folder}\n{additional_configs_folder}\n{launch_options_file}"
+            f"Checked:\n{source_user_app_folder}\n{additional_configs_folder}"
         )
 
     log_lines = [
         f"Base folder: {base_folder}",
         f"CS:GO cfg root: {csgo_cfg_root}",
-        f"Default configs folder: {default_configs_folder}",
+        f"Source 4465480 folder: {source_user_app_folder}",
         f"Additional configs folder: {additional_configs_folder}",
-        f"Launch options file: {launch_options_file}",
         f"Video files found: {len(video_files)}",
     ]
 
     steam_path = get_steam_path()
     library_folders = get_library_folders(steam_path)
-    csgo_install_dir = find_csgo_install_dir(library_folders)
-    user_folders = get_user_folders(steam_path)
-
-    csgo_cfg_destination = csgo_install_dir / "csgo" / "cfg"
-    csgo_videos_destination = csgo_install_dir / "csgo" / "panorama" / "videos"
+    user_folders = get_target_user_folders(steam_path, log_lines)
 
     log_lines.extend([
         f"Steam path: {steam_path}",
-        f"CS:GO install dir: {csgo_install_dir}",
-        f"CS:GO cfg destination: {csgo_cfg_destination}",
-        f"CS:GO videos destination: {csgo_videos_destination}",
-        f"Steam user folders found: {len(user_folders)}",
+        f"Steam target user folders: {len(user_folders)}",
     ])
-
-    launch_options = ""
-    if launch_options_file.exists() and launch_options_file.is_file():
-        try:
-            launch_options = launch_options_file.read_text(encoding="utf-8").strip()
-        except Exception as e:
-            raise_error(f"Failed to read launch_options.txt:\n{e}")
 
     total_copied = 0
     total_failed = 0
     users_processed = 0
-    users_skipped = 0
-    localconfigs_updated = 0
+
+    csgo_install_dir = find_csgo_install_dir(library_folders)
+    csgo_cfg_destination = csgo_install_dir / "csgo" / "cfg"
+    csgo_videos_destination = csgo_install_dir / "csgo" / "panorama" / "videos"
+
+    log_lines.extend([
+        f"CS:GO install dir: {csgo_install_dir}",
+        f"CS:GO cfg destination: {csgo_cfg_destination}",
+        f"CS:GO videos destination: {csgo_videos_destination}",
+    ])
 
     c, f = copy_tree_files(additional_configs_folder, csgo_cfg_destination, log_lines)
     total_copied += c
@@ -654,44 +782,26 @@ def install_csgo_configs() -> str:
         total_copied += c
         total_failed += f
 
-    for user_folder in user_folders:
-        app_folder = user_folder / CSGO_APP_ID
-        if not app_folder.exists():
-            users_skipped += 1
-            log_lines.append(f"SKIPPED USER (no {CSGO_APP_ID} folder): {user_folder}")
-            continue
-
-        c, f = copy_tree_files(default_configs_folder, app_folder / "local" / "cfg", log_lines)
-        total_copied += c
-        total_failed += f
-
-        if launch_options:
-            c, f = set_launch_options_for_user(user_folder, CSGO_APP_ID, launch_options, log_lines)
-            localconfigs_updated += c
-            total_failed += f
-
-        users_processed += 1
+    c, f, users_processed = copy_app_folder_to_users(source_user_app_folder, user_folders, log_lines)
+    total_copied += c
+    total_failed += f
 
     log_lines.extend([
         f"Users processed: {users_processed}",
-        f"Users skipped: {users_skipped}",
-        f"localconfig.vdf files updated: {localconfigs_updated}",
         f"Files copied: {total_copied}",
         f"Failed operations: {total_failed}",
     ])
 
-    write_log(log_file, "CS:GO Config Copy", log_lines)
+    write_log(log_file, "CS:GO Config Paste", log_lines)
 
-    if total_copied == 0 and total_failed == 0 and localconfigs_updated == 0:
-        raise_error(f"No CS:GO files were copied.\n\nSee log:\n{log_file}")
+    if total_copied == 0 and total_failed == 0:
+        raise_error(f"No CS:GO files were pasted.\n\nSee log:\n{log_file}")
 
     return "\n".join([
-        "Copy csgo_cfg completed.",
+        "Paste csgo_cfg completed.",
         f"Files copied: {total_copied}",
-        f"localconfig.vdf files updated: {localconfigs_updated}",
         f"Failed operations: {total_failed}",
         f"Users processed: {users_processed}",
-        f"Users skipped: {users_skipped}",
         f"Log file: {log_file}",
     ])
 
@@ -762,13 +872,13 @@ def install_server_configs(server_folder: Path) -> str:
         f"Failed operations: {total_failed}",
     ])
 
-    write_log(log_file, "CS2 Server Config Copy", log_lines)
+    write_log(log_file, "CS2 Server Config Paste", log_lines)
 
     if total_copied == 0 and total_failed == 0:
         raise_error(f"No server files were copied.\n\nSee log:\n{log_file}")
 
     return "\n".join([
-        "Copy cs2_server_cfg completed.",
+        "Paste cs2_server_cfg completed.",
         f"Files copied: {total_copied}",
         f"Failed operations: {total_failed}",
         f"Plugins processed: {plugins_processed}",
@@ -786,6 +896,7 @@ class App(tk.Tk):
         self.title(APP_TITLE)
         self.resizable(False, False)
         self.server_dir_var = tk.StringVar()
+        self.primary_account_var = tk.StringVar()
 
         icon_path = get_app_icon_path()
         if icon_path is not None:
@@ -818,15 +929,51 @@ class App(tk.Tk):
         yellow_warning = tk.Label(
             root,
             text="Make sure CS2/CS:GO are installed",
-            fg="#b8860b",
+            fg=STEAM_WARNING_COLOR,
             font=("Segoe UI", 9, "bold"),
             anchor="w",
             justify="left",
         )
-        yellow_warning.grid(row=2, column=0, sticky="w", pady=(0, 8))
+        yellow_warning.grid(row=2, column=0, sticky="w", pady=(0, 6))
 
-        cs2_frame = ttk.LabelFrame(root, text="CS2", padding=8)
-        cs2_frame.grid(row=3, column=0, sticky="ew", pady=(0, 6))
+        steam_frame = ttk.LabelFrame(root, text="Steam", padding=6)
+        steam_frame.grid(row=3, column=0, sticky="ew", pady=(0, 6))
+
+        primary_label = ttk.Label(steam_frame, text="Choose primary Steam account")
+        primary_label.grid(row=0, column=0, sticky="w", padx=(0, 3))
+
+        self.primary_account_combo = ttk.Combobox(
+            steam_frame,
+            textvariable=self.primary_account_var,
+            state="readonly",
+            width=16,
+            values=[],
+        )
+        self.primary_account_combo.grid(row=0, column=1, sticky="w", padx=(0, 3))
+
+        load_accounts_button = ttk.Button(
+            steam_frame,
+            text="Load",
+            command=self.on_load_steam_accounts,
+        )
+        load_accounts_button.grid(row=0, column=2, sticky="w")
+
+        copy_steam_settings_button = ttk.Button(
+            steam_frame,
+            text="Copy all Steam settings",
+            command=self.on_copy_all_steam_settings,
+        )
+        copy_steam_settings_button.grid(row=1, column=0, sticky="w", pady=(3, 0), padx=(0, 2))
+
+        paste_steam_settings_button = ttk.Button(
+            steam_frame,
+            text="Paste all Steam settings",
+            command=self.on_paste_all_steam_settings,
+        )
+        paste_steam_settings_button.grid(row=1, column=1, columnspan=2, sticky="e", pady=(3, 0))
+
+        cs2_frame = ttk.LabelFrame(root, text="CS2", padding=6)
+        cs2_frame.grid(row=4, column=0, sticky="ew", pady=(0, 6))
 
         cs2_text = ttk.Label(
             cs2_frame,
@@ -834,13 +981,20 @@ class App(tk.Tk):
             wraplength=300,
             justify="left",
         )
-        cs2_text.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        cs2_text.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-        cs2_button = ttk.Button(cs2_frame, text="Copy cs2_cfg", command=self.on_install_cs2)
-        cs2_button.grid(row=1, column=0, sticky="w")
+        copy_current_cs2_button = ttk.Button(
+            cs2_frame,
+            text="Copy current CS2 settings",
+            command=self.on_copy_current_cs2,
+        )
+        copy_current_cs2_button.grid(row=1, column=0, sticky="w", padx=(0, 2))
 
-        csgo_frame = ttk.LabelFrame(root, text="CS:GO", padding=8)
-        csgo_frame.grid(row=4, column=0, sticky="ew", pady=(0, 6))
+        paste_cs2_button = ttk.Button(cs2_frame, text="Paste cs2_cfg", command=self.on_install_cs2)
+        paste_cs2_button.grid(row=1, column=1, sticky="e")
+
+        csgo_frame = ttk.LabelFrame(root, text="CS:GO", padding=6)
+        csgo_frame.grid(row=5, column=0, sticky="ew", pady=(0, 6))
 
         csgo_text = ttk.Label(
             csgo_frame,
@@ -848,13 +1002,20 @@ class App(tk.Tk):
             wraplength=300,
             justify="left",
         )
-        csgo_text.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        csgo_text.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-        csgo_button = ttk.Button(csgo_frame, text="Copy csgo_cfg", command=self.on_install_csgo)
-        csgo_button.grid(row=1, column=0, sticky="w")
+        copy_current_csgo_button = ttk.Button(
+            csgo_frame,
+            text="Copy current CS:GO settings",
+            command=self.on_copy_current_csgo,
+        )
+        copy_current_csgo_button.grid(row=1, column=0, sticky="w", padx=(0, 2))
 
-        server_frame = ttk.LabelFrame(root, text="CS2 Server", padding=8)
-        server_frame.grid(row=5, column=0, sticky="ew")
+        paste_csgo_button = ttk.Button(csgo_frame, text="Paste csgo_cfg", command=self.on_install_csgo)
+        paste_csgo_button.grid(row=1, column=1, sticky="e")
+
+        server_frame = ttk.LabelFrame(root, text="CS2 Server", padding=6)
+        server_frame.grid(row=6, column=0, sticky="ew")
 
         server_notice = tk.Label(
             server_frame,
@@ -864,16 +1025,16 @@ class App(tk.Tk):
             anchor="w",
             justify="left",
         )
-        server_notice.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        server_notice.grid(row=0, column=0, sticky="w", pady=(0, 4))
 
         server_path_label = ttk.Label(server_frame, text="Server folder:")
         server_path_label.grid(row=1, column=0, sticky="w")
 
         server_path_row = ttk.Frame(server_frame)
-        server_path_row.grid(row=2, column=0, sticky="ew", pady=(3, 6))
+        server_path_row.grid(row=2, column=0, sticky="ew", pady=(3, 4))
 
         server_path_entry = ttk.Entry(server_path_row, textvariable=self.server_dir_var, width=34)
-        server_path_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        server_path_entry.grid(row=0, column=0, sticky="ew", padx=(0, 4))
 
         browse_button = ttk.Button(server_path_row, text="Choose dir", command=self.on_browse_server_folder)
         browse_button.grid(row=0, column=1)
@@ -884,14 +1045,18 @@ class App(tk.Tk):
             wraplength=300,
             justify="left",
         )
-        server_text.grid(row=3, column=0, sticky="w", pady=(0, 6))
+        server_text.grid(row=3, column=0, sticky="w", pady=(0, 4))
 
-        server_button = ttk.Button(server_frame, text="Copy cs2_server_cfg", command=self.on_install_server)
+        server_button = ttk.Button(server_frame, text="Paste cs2_server_cfg", command=self.on_install_server)
         server_button.grid(row=4, column=0, sticky="w")
 
         root.columnconfigure(0, weight=1)
+        steam_frame.columnconfigure(0, weight=1)
+        steam_frame.columnconfigure(1, weight=1)
         cs2_frame.columnconfigure(0, weight=1)
+        cs2_frame.columnconfigure(1, weight=1)
         csgo_frame.columnconfigure(0, weight=1)
+        csgo_frame.columnconfigure(1, weight=1)
         server_frame.columnconfigure(0, weight=1)
         server_path_row.columnconfigure(0, weight=1)
 
@@ -908,6 +1073,44 @@ class App(tk.Tk):
             messagebox.showerror(f"{APP_TITLE} - Error", str(e), parent=self)
         except Exception as e:
             messagebox.showerror(f"{APP_TITLE} - Error", f"Unexpected error:\n{e}", parent=self)
+
+    def _confirm_overwrite(self) -> bool:
+        return messagebox.askyesno(
+            APP_TITLE,
+            "Your current Steam settings will be overwritten",
+            parent=self,
+        )
+
+    def on_load_steam_accounts(self) -> None:
+        try:
+            user_ids = load_steam_account_ids()
+            if not user_ids:
+                raise_error("No Steam accounts were found.")
+
+            self.primary_account_combo["values"] = user_ids
+            self.primary_account_var.set(user_ids[0])
+        except CopierError as e:
+            messagebox.showerror(f"{APP_TITLE} - Error", str(e), parent=self)
+        except Exception as e:
+            messagebox.showerror(f"{APP_TITLE} - Error", f"Unexpected error:\n{e}", parent=self)
+
+    def on_copy_all_steam_settings(self) -> None:
+        if not self._confirm_overwrite():
+            return
+        self._show_result(export_all_steam_settings)
+
+    def on_paste_all_steam_settings(self) -> None:
+        self._show_result(import_all_steam_settings)
+
+    def on_copy_current_cs2(self) -> None:
+        if not self._confirm_overwrite():
+            return
+        self._show_result(lambda: copy_current_cs2_settings(self.primary_account_var.get().strip()))
+
+    def on_copy_current_csgo(self) -> None:
+        if not self._confirm_overwrite():
+            return
+        self._show_result(lambda: copy_current_csgo_settings(self.primary_account_var.get().strip()))
 
     def on_install_cs2(self) -> None:
         self._show_result(install_cs2_configs)
