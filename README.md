@@ -8,19 +8,15 @@
 
 It is designed for people who want to keep their configs organized, restore settings faster, and reuse the same setup across multiple Steam accounts without manually copying files into each directory. It can also help preserve Steam settings such as Invisible mode and other Steam- or game-related settings when reinstalling Steam or Windows.
 
-## You can download the latest version here: [Releases](https://github.com/opalgeorgii/CS2ConfigCopier/releases)
+### You can download the latest version here: [Releases](https://github.com/opalgeorgii/CS2ConfigCopier/releases)
 
-## You can view the screenshots here: [Screenshots](#screenshots)
-
----
+### You can view the screenshots here: [Screenshots](#screenshots)
 
 ## Important
 
 **Close Steam completely before running the program.**
 
 If Steam is still running, some files may not copy correctly, or Steam may overwrite them after the program finishes.
-
----
 
 ## Usage
 
@@ -43,8 +39,6 @@ The program automatically detects Steam regardless of where it is installed, fin
 12. It is best not to modify the `default_configs/` folder. You can delete or replace other files if needed, but keep the same overall folder structure as in the downloaded project.
 13. When everything has been copied successfully, open Steam again.
 
----
-
 ## CS2 Server Installation
 
 At the bottom of the program, you can find the **CS2 Server** section. If your CS2 server is already set up, the program can automatically copy all required server config files, plugins, and plugin cfg files.
@@ -60,8 +54,6 @@ At the bottom of the program, you can find the **CS2 Server** section. If your C
 
 **Only the files that exist in your project folders will be copied.**
 
----
-
 ## Recommended Setup
 
 A practical way to use this project is to keep the provided folder structure and simply replace the included files with your own.
@@ -76,8 +68,6 @@ Recommended approach:
 This makes the project easier to update and helps avoid breaking the intended layout.
 
 **Only the files that exist in your project folders will be copied.**
-
----
 
 ## Notes
 
@@ -97,8 +87,6 @@ If you use a **Danger Zone cfg** for CS:GO, it must be applied in the correct or
 
 If you skip the first step, CS:GO may crash.
 
----
-
 ## Screenshots
 
 ### Main Window
@@ -113,8 +101,6 @@ Shows the main application layout.
 
 Shows the expected project structure.
 
----
-
 ## Requirements
 
 - **Windows**
@@ -124,23 +110,17 @@ Shows the expected project structure.
 
 If you use the compiled `.exe`, Python is not required.
 
----
-
 ## Support
 
 If you would like to support me, you can donate here:
 
 **[Donate via Donatello](https://donatello.to/opalgeorgii)**
 
----
-
 ## Related Project
 
 For my Counter-Strike 2 plugin project, see:
 
 - [WallhackPluginCS2](https://github.com/opalgeorgii/WallhackPluginCS2)
-
----
 
 ## Contact
 
