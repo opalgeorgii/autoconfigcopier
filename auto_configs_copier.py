@@ -75,12 +75,6 @@ def has_any_files(folder: Path) -> bool:
     return folder.exists() and folder.is_dir() and any(p.is_file() for p in folder.rglob("*"))
 
 
-def get_required_file(file_path: Path, description: str) -> Path:
-    if file_path.exists() and file_path.is_file():
-        return file_path
-    raise_error(f"{description} was not found:\n{file_path}")
-
-
 def remove_existing_path(path: Path, log_lines: list[str]) -> None:
     if not path.exists():
         return
@@ -1074,10 +1068,10 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror(f"{APP_TITLE} - Error", f"Unexpected error:\n{e}", parent=self)
 
-    def _confirm_overwrite(self) -> bool:
+    def _confirm_overwrite(self, message: str) -> bool:
         return messagebox.askyesno(
             APP_TITLE,
-            "Your current Steam settings will be overwritten",
+            message,
             parent=self,
         )
 
@@ -1095,7 +1089,7 @@ class App(tk.Tk):
             messagebox.showerror(f"{APP_TITLE} - Error", f"Unexpected error:\n{e}", parent=self)
 
     def on_copy_all_steam_settings(self) -> None:
-        if not self._confirm_overwrite():
+        if not self._confirm_overwrite("Your current Steam settings will be overwritten"):
             return
         self._show_result(export_all_steam_settings)
 
@@ -1103,12 +1097,12 @@ class App(tk.Tk):
         self._show_result(import_all_steam_settings)
 
     def on_copy_current_cs2(self) -> None:
-        if not self._confirm_overwrite():
+        if not self._confirm_overwrite("Your current CS2 settings will be overwritten"):
             return
         self._show_result(lambda: copy_current_cs2_settings(self.primary_account_var.get().strip()))
 
     def on_copy_current_csgo(self) -> None:
-        if not self._confirm_overwrite():
+        if not self._confirm_overwrite("Your current CS:GO settings will be overwritten"):
             return
         self._show_result(lambda: copy_current_csgo_settings(self.primary_account_var.get().strip()))
 
