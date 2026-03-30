@@ -11,4 +11,5 @@ Thumbs.db
 *.pyc
 *.spec
 *.exe
+*.vdf
 logs.txt
