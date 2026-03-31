@@ -22,21 +22,29 @@ If Steam is still running, some files may not copy correctly, or Steam may overw
 
 The program automatically detects Steam regardless of where it is installed, finds the installed game folders, and saves or copies files to the correct folders for **all** Steam accounts that have been logged in on that PC.
 
-1. Download the latest version from the [Releases](https://github.com/opalgeorgii/CS2ConfigCopier/releases) page.
-2. Configure your CS2, CS:GO, and Steam settings manually once on your primary account.  
-   If you have other accounts, configure only the Steam settings on them.  
-   Skip this step if everything is already set up.
-3. Close Steam completely.
-4. Open `CS2ConfigCopier.exe` and click **Load** to load all current Steam account IDs.
-5. Select the ID that corresponds to your primary account.  
-   If you do not know your Steam ID, use [Steam32ID](https://steamid.xyz/) and paste your Steam profile link there.
-6. Click **Copy all Steam settings** to copy Steam settings from all accounts into the `steam_account_settings/` folder that will be created.
-7. Click **Copy current CS2 settings** or **Copy current CS:GO settings** to copy config files from the selected primary account.
-8. If you do not need the `cs2_cfg/`, `cs2_server_cfg/`, `csgo_cfg/`, or `steam_account_settings/` folders, you can delete them.
-9. Inside the first three folders, you will also find `additional_configs/` or other files that you may want to replace or remove. These are my own configs, so feel free to use them if you want.
-10. It is recommended not to delete base folders such as `cs2_cfg/`, `cs2_server_cfg/`, or `csgo_cfg/`. It is better to keep the folder structure and only remove the files you do not need, although this is not mandatory.
-11. Once your configs are copied, save those folders somewhere safe. Later, if you reinstall Windows, move to another PC, go to a computer club, or lose your settings for any reason, you can restore them by opening `CS2ConfigCopier.exe` and clicking either **Paste all Steam settings**, **Paste cs2_cfg**, or **Paste csgo_cfg**.
-12. It is best not to modify the `default_configs/` folder. You can delete or replace other files if needed, but keep the same overall folder structure as in the downloaded project.
+### First-time setup
+
+0. Download the latest version from the [Releases](https://github.com/opalgeorgii/CS2ConfigCopier/releases)
+1. Configure your Steam and CS2/CS:GO settings once.
+2. Open `CS2ConfigCopier.exe`, then restart Steam.
+3. Click **Load** and choose the primary Steam account from which your CS2/CS:GO settings will be copied.  
+   Use [steamid.xyz](https://steamid.xyz/) if you need to look up your SteamID.
+4. Click:
+   - **Copy all Steam settings**
+   - **Copy current CS2 settings** and/or **Copy current CS:GO settings**
+5. Save the entire folder, including all subfolders and the `.exe` file.
+
+### Restoring your settings later
+
+Use these steps after reinstalling Windows or Steam, using a different account, or playing from another PC or computer club.
+
+0. Retrieve your saved configuration folder with `CS2ConfigCopier.exe`.
+1. Open `CS2ConfigCopier.exe` and close Steam completely.
+2. Click:
+   - **Paste all Steam settings**
+   - **Paste cs2_cfg** and/or **Paste csgo_cfg**
+3. Launch CS2.
+4. Open CS2 **Steam Properties** and enable **Keep game's saves in the Steam Cloud for Counter-Strike 2**.
 13. When everything has been copied successfully, open Steam again.
 
 ## CS2 Server Installation

@@ -8,16 +8,16 @@ IMPORTANT
 
 INSTRUCTIONS
 ----------------------------------------
-Upon 1st usage:
+First-time setup:
 0. Configure your Steam and CS2/CS:GO settings ONCE
-1. Open CSConfigCopier.exe
+1. Open CSConfigCopier.exe and restart Steam
 2. Click on "Load" and choose primary Steam account from where your CS2/CS:GO settings will be copied (https://steamid.xyz/ to look up your SteamID)
 3. Click on "Copy all Steam settings", "Copy current CS2 settings"/"Copy current CS:GO settings"
 4. Save the whole folder with all the folders and the .exe file
 
-Upon 2nd usage (reinstalled Windows/Steam/using a different account/playing from a computer club):
+Restoring your settings later (reinstalled Windows/Steam/using a different account/playing from a computer club):
 0. Retrieve your saved configurtation folder with CS2ConfigCopier.exe
-1. Open the app
+1. Open CSConfigCopier.exe and close Steam completely
 2. Click on "Paste all Steam settings" and "Paste cs2_cfg"/"Paste csgo_cfg"
 3. Launch CS2
 4. Open CS2 Steam properties and enable "Keep game's saves in the Steam Cloud for Counter-Strike 2"
