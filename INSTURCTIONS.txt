@@ -19,6 +19,8 @@ Upon 2nd usage (reinstalled Windows/Steam/using a different account/playing from
 0. Retrieve your saved configurtation folder with CS2ConfigCopier.exe
 1. Open the app
 2. Click on "Paste all Steam settings" and "Paste cs2_cfg"/"Paste csgo_cfg"
+3. Launch CS2
+4. Open CS2 Steam properties and enable "Keep game's saves in the Steam Cloud for Counter-Strike 2"
 
 FOLDER INFORMATION
 ----------------------------------------
