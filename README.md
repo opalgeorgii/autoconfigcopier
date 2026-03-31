@@ -45,7 +45,6 @@ Use these steps after reinstalling Windows or Steam, using a different account, 
    - **Paste cs2_cfg** and/or **Paste csgo_cfg**
 3. Launch CS2.
 4. Open CS2 **Steam Properties** and enable **Keep game's saves in the Steam Cloud for Counter-Strike 2**.
-13. When everything has been copied successfully, open Steam again.
 
 ## CS2 Server Installation
 
