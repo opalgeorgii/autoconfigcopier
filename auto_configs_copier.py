@@ -15,6 +15,10 @@ CS2_INSTALL_FALLBACK_DIRS = ("Counter-Strike Global Offensive",)
 CSGO_INSTALL_FALLBACK_DIRS = ("csgo legacy",)
 CSGO_VIDEO_EXTENSIONS = {".webm", ".web"}
 STEAM_SETTINGS_FILE_NAME = "localconfig.vdf"
+SHARED_CONFIG_FILE_NAME = "sharedconfig.vdf"
+STEAM_ACCOUNT_SETTINGS_DIR_NAME = "steam_account_settings"
+SHARED_CONFIG_RELATIVE_PATH = Path("7") / "remote" / SHARED_CONFIG_FILE_NAME
+MISSING_STEAM_LOGIN_OR_SETTINGS_MESSAGE = "You haven't logged in to Steam or pasted all Steam settings"
 STEAM_WARNING_COLOR = "#c97a00"
 
 
@@ -203,6 +207,70 @@ def _find_existing_key_ci(mapping: OrderedDict | dict, wanted_key: str) -> str |
         if str(existing_key).lower() == wanted_lower:
             return str(existing_key)
     return None
+
+
+def _vdf_escape(value: object) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _vdf_dump_object(mapping: OrderedDict | dict, indent_level: int = 0) -> list[str]:
+    indent = "\t" * indent_level
+    child_indent_level = indent_level + 1
+    lines: list[str] = []
+
+    for key, value in mapping.items():
+        escaped_key = _vdf_escape(key)
+        if isinstance(value, dict):
+            lines.append(f'{indent}"{escaped_key}"')
+            lines.append(f"{indent}{{")
+            lines.extend(_vdf_dump_object(value, child_indent_level))
+            lines.append(f"{indent}}}")
+        else:
+            escaped_value = _vdf_escape(value)
+            lines.append(f'{indent}"{escaped_key}"\t\t"{escaped_value}"')
+
+    return lines
+
+
+def write_vdf_file(file_path: Path, data: OrderedDict | dict) -> None:
+    try:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        content = "\n".join(_vdf_dump_object(data)) + "\n"
+        file_path.write_text(content, encoding="utf-8")
+    except Exception as e:
+        raise VDFError(f"Failed to write VDF file:\n{file_path}\n{e}")
+
+
+def _get_or_create_nested_mapping(parent: OrderedDict | dict, key: str) -> OrderedDict:
+    existing_key = _find_existing_key_ci(parent, key)
+    if existing_key is not None and isinstance(parent[existing_key], dict):
+        return parent[existing_key]
+
+    child: OrderedDict[str, object] = OrderedDict()
+    parent[key] = child
+    return child
+
+
+def set_cs2_cloud_enabled_value(file_path: Path, enabled_value: str) -> None:
+    try:
+        data = read_vdf_file(file_path) if file_path.exists() else OrderedDict()
+    except VDFError:
+        data = OrderedDict()
+
+    root = _get_or_create_nested_mapping(data, "UserRoamingConfigStore")
+    software = _get_or_create_nested_mapping(root, "Software")
+    valve = _get_or_create_nested_mapping(software, "Valve")
+    steam = _get_or_create_nested_mapping(valve, "Steam")
+    apps = _get_or_create_nested_mapping(steam, "Apps")
+    cs2_app = _get_or_create_nested_mapping(apps, CS2_APP_ID)
+
+    existing_key = _find_existing_key_ci(cs2_app, "cloudenabled")
+    if existing_key is not None:
+        cs2_app[existing_key] = enabled_value
+    else:
+        cs2_app["cloudenabled"] = enabled_value
+
+    write_vdf_file(file_path, data)
 
 
 # -----------------------------
@@ -453,9 +521,139 @@ def validate_server_folder(server_folder: Path) -> Path:
 # Steam exports / snapshots
 # -----------------------------
 
+
 def load_steam_account_ids() -> list[str]:
     steam_path = get_steam_path()
     return get_user_ids_from_userdata(steam_path)
+
+
+def get_steam_account_settings_root(base_folder: Path) -> Path:
+    return base_folder / STEAM_ACCOUNT_SETTINGS_DIR_NAME
+
+
+def get_saved_steam_account_folders(base_folder: Path) -> list[Path]:
+    export_root = get_steam_account_settings_root(base_folder)
+    if not export_root.exists() or not export_root.is_dir():
+        return []
+
+    saved_user_folders = [
+        folder for folder in export_root.iterdir()
+        if folder.is_dir() and folder.name.isdigit()
+    ]
+    saved_user_folders.sort(key=lambda folder: int(folder.name))
+    return saved_user_folders
+
+
+def get_saved_user_target_folders(steam_path: Path, log_lines: list[str]) -> list[Path]:
+    base_folder = get_base_folder()
+    saved_user_folders = get_saved_steam_account_folders(base_folder)
+    if not saved_user_folders:
+        raise_error(MISSING_STEAM_LOGIN_OR_SETTINGS_MESSAGE)
+
+    user_folders_by_id = {folder.name: folder for folder in get_user_folders(steam_path)}
+    missing_ids = [folder.name for folder in saved_user_folders if folder.name not in user_folders_by_id]
+    if missing_ids:
+        raise_error(MISSING_STEAM_LOGIN_OR_SETTINGS_MESSAGE)
+
+    matched_folders = [user_folders_by_id[folder.name] for folder in saved_user_folders]
+    log_lines.append(f"Using saved Steam account folders: {len(saved_user_folders)}")
+    return matched_folders
+
+
+def export_sharedconfig_files_for_all_users(disable_cs2_cloud: bool = False) -> str:
+    base_folder = get_base_folder()
+    log_file = get_log_file_path(base_folder)
+    steam_path = get_steam_path()
+    user_folders = get_user_folders(steam_path)
+    export_root = get_steam_account_settings_root(base_folder)
+
+    if not user_folders:
+        raise_error(f"No Steam account folders were found in:\n{get_userdata_folder(steam_path)}")
+
+    log_lines = [
+        f"Base folder: {base_folder}",
+        f"Steam path: {steam_path}",
+        f"Userdata folder: {get_userdata_folder(steam_path)}",
+        f"Export folder: {export_root}",
+        f"Steam accounts found: {len(user_folders)}",
+        f"Disable CS2 Steam Cloud after copy: {'yes' if disable_cs2_cloud else 'no'}",
+    ]
+
+    copied = 0
+    failed = 0
+    missing = 0
+    updated = 0
+    update_failed = 0
+    update_missing = 0
+
+    for user_folder in user_folders:
+        src_file = user_folder / SHARED_CONFIG_RELATIVE_PATH
+        dst_file = export_root / user_folder.name / SHARED_CONFIG_RELATIVE_PATH
+
+        if not src_file.exists() or not src_file.is_file():
+            missing += 1
+            log_lines.append(f"SKIPPED missing file: {src_file}")
+            continue
+
+        c, f = copy_file(src_file, dst_file, log_lines)
+        copied += c
+        failed += f
+
+    if disable_cs2_cloud:
+        saved_user_folders = get_saved_steam_account_folders(base_folder)
+        for saved_user_folder in saved_user_folders:
+            sharedconfig_file = saved_user_folder / SHARED_CONFIG_RELATIVE_PATH
+
+            if not sharedconfig_file.exists() or not sharedconfig_file.is_file():
+                update_missing += 1
+                log_lines.append(f"SKIPPED missing sharedconfig for update: {sharedconfig_file}")
+                continue
+
+            try:
+                set_cs2_cloud_enabled_value(sharedconfig_file, "0")
+                updated += 1
+                log_lines.append(f"UPDATED CS2 CLOUD: {sharedconfig_file} -> 0")
+            except Exception as e:
+                update_failed += 1
+                log_lines.append(f"FAILED UPDATE: {sharedconfig_file} | {e}")
+
+    log_lines.extend([
+        f"Sharedconfig files copied: {copied}",
+        f"Sharedconfig files missing: {missing}",
+        f"Sharedconfig files failed: {failed}",
+        f"Sharedconfig files updated: {updated}",
+        f"Sharedconfig update missing: {update_missing}",
+        f"Sharedconfig update failed: {update_failed}",
+    ])
+    write_log(log_file, "Steam Sharedconfig Export", log_lines)
+
+    if copied == 0 and updated == 0:
+        raise_error(
+            "No sharedconfig.vdf files were copied.\n\n"
+            f"Expected file:\n{SHARED_CONFIG_FILE_NAME}\n\n"
+            f"See log:\n{log_file}"
+        )
+
+    result_lines = [
+        "Steam sharedconfig export completed.",
+        f"Steam accounts found: {len(user_folders)}",
+        f"Sharedconfig files copied: {copied}",
+        f"Missing sharedconfig files: {missing}",
+        f"Failed sharedconfig copies: {failed}",
+    ]
+
+    if disable_cs2_cloud:
+        result_lines.extend([
+            f"Sharedconfig files updated to cloudenabled=0: {updated}",
+            f"Missing sharedconfig files for update: {update_missing}",
+            f"Failed sharedconfig updates: {update_failed}",
+        ])
+
+    result_lines.extend([
+        f"Saved to: {export_root}",
+        f"Log file: {log_file}",
+    ])
+    return "\n".join(result_lines)
 
 
 def export_all_steam_settings() -> str:
@@ -463,7 +661,7 @@ def export_all_steam_settings() -> str:
     log_file = get_log_file_path(base_folder)
     steam_path = get_steam_path()
     user_folders = get_user_folders(steam_path)
-    export_root = base_folder / "steam_account_settings"
+    export_root = get_steam_account_settings_root(base_folder)
 
     if not user_folders:
         raise_error(f"No Steam account folders were found in:\n{get_userdata_folder(steam_path)}")
@@ -525,16 +723,12 @@ def import_all_steam_settings() -> str:
     log_file = get_log_file_path(base_folder)
     steam_path = get_steam_path()
     userdata_folder = get_userdata_folder(steam_path)
-    import_root = base_folder / "steam_account_settings"
+    import_root = get_steam_account_settings_root(base_folder)
 
     if not import_root.exists() or not import_root.is_dir():
         raise_error(f"Saved Steam settings folder was not found:\n{import_root}")
 
-    saved_user_folders = [
-        folder for folder in import_root.iterdir()
-        if folder.is_dir() and folder.name.isdigit()
-    ]
-    saved_user_folders.sort(key=lambda folder: int(folder.name))
+    saved_user_folders = get_saved_steam_account_folders(base_folder)
 
     if not saved_user_folders:
         raise_error(f"No saved Steam account settings were found in:\n{import_root}")
@@ -631,16 +825,44 @@ def export_selected_user_app_settings(app_id: str, config_root_name: str, select
 
 
 def copy_current_cs2_settings(selected_user_id: str) -> str:
-    return export_selected_user_app_settings(CS2_APP_ID, "cs2_cfg", selected_user_id, "CS2")
+    game_result = export_selected_user_app_settings(CS2_APP_ID, "cs2_cfg", selected_user_id, "CS2")
+    sharedconfig_result = export_sharedconfig_files_for_all_users(disable_cs2_cloud=True)
+    return f"{game_result}\n\n{sharedconfig_result}"
 
 
 def copy_current_csgo_settings(selected_user_id: str) -> str:
     return export_selected_user_app_settings(CSGO_APP_ID, "csgo_cfg", selected_user_id, "CS:GO")
 
 
+
 # -----------------------------
 # Install operations
 # -----------------------------
+
+
+def copy_saved_sharedconfig_files(user_folders: list[Path], log_lines: list[str]) -> tuple[int, int, int]:
+    base_folder = get_base_folder()
+    saved_root = get_steam_account_settings_root(base_folder)
+
+    copied = 0
+    failed = 0
+    files_found = 0
+
+    for user_folder in user_folders:
+        src_file = saved_root / user_folder.name / SHARED_CONFIG_RELATIVE_PATH
+        dst_file = user_folder / SHARED_CONFIG_RELATIVE_PATH
+
+        if not src_file.exists() or not src_file.is_file():
+            log_lines.append(f"SKIPPED missing file: {src_file}")
+            continue
+
+        files_found += 1
+        c, f = copy_file(src_file, dst_file, log_lines)
+        copied += c
+        failed += f
+
+    return copied, failed, files_found
+
 
 def install_cs2_configs() -> str:
     base_folder = get_base_folder()
@@ -666,7 +888,7 @@ def install_cs2_configs() -> str:
 
     steam_path = get_steam_path()
     library_folders = get_library_folders(steam_path)
-    user_folders = get_target_user_folders(steam_path, log_lines)
+    user_folders = get_saved_user_target_folders(steam_path, log_lines)
 
     log_lines.extend([
         f"Steam path: {steam_path}",
@@ -676,6 +898,7 @@ def install_cs2_configs() -> str:
     total_copied = 0
     total_failed = 0
     users_processed = 0
+    sharedconfig_files_found = 0
 
     cs2_install_dir = find_cs2_install_dir(library_folders)
     cs2_cfg_destination = cs2_install_dir / "game" / "csgo" / "cfg"
@@ -693,8 +916,13 @@ def install_cs2_configs() -> str:
     total_copied += c
     total_failed += f
 
+    c, f, sharedconfig_files_found = copy_saved_sharedconfig_files(user_folders, log_lines)
+    total_copied += c
+    total_failed += f
+
     log_lines.extend([
         f"Users processed: {users_processed}",
+        f"Sharedconfig files found: {sharedconfig_files_found}",
         f"Files copied: {total_copied}",
         f"Failed copies: {total_failed}",
     ])
@@ -709,6 +937,7 @@ def install_cs2_configs() -> str:
         f"Files copied: {total_copied}",
         f"Failed copies: {total_failed}",
         f"Users processed: {users_processed}",
+        f"Sharedconfig files found: {sharedconfig_files_found}",
         f"Log file: {log_file}",
     ])
 
@@ -746,7 +975,7 @@ def install_csgo_configs() -> str:
 
     steam_path = get_steam_path()
     library_folders = get_library_folders(steam_path)
-    user_folders = get_target_user_folders(steam_path, log_lines)
+    user_folders = get_saved_user_target_folders(steam_path, log_lines)
 
     log_lines.extend([
         f"Steam path: {steam_path}",
@@ -756,6 +985,7 @@ def install_csgo_configs() -> str:
     total_copied = 0
     total_failed = 0
     users_processed = 0
+    sharedconfig_files_found = 0
 
     csgo_install_dir = find_csgo_install_dir(library_folders)
     csgo_cfg_destination = csgo_install_dir / "csgo" / "cfg"
@@ -780,8 +1010,13 @@ def install_csgo_configs() -> str:
     total_copied += c
     total_failed += f
 
+    c, f, sharedconfig_files_found = copy_saved_sharedconfig_files(user_folders, log_lines)
+    total_copied += c
+    total_failed += f
+
     log_lines.extend([
         f"Users processed: {users_processed}",
+        f"Sharedconfig files found: {sharedconfig_files_found}",
         f"Files copied: {total_copied}",
         f"Failed operations: {total_failed}",
     ])
@@ -796,6 +1031,7 @@ def install_csgo_configs() -> str:
         f"Files copied: {total_copied}",
         f"Failed operations: {total_failed}",
         f"Users processed: {users_processed}",
+        f"Sharedconfig files found: {sharedconfig_files_found}",
         f"Log file: {log_file}",
     ])
 
