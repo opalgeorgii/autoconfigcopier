@@ -1,0 +1,49 @@
+IMPORTANT
+- Do not move the CS2ConfigCopier.exe file
+- Better to keep the folder structure unchanged
+- It isn't recommended to delete the base folders:
+  - cs2_cfg/
+  - cs2_server_cfg/
+  - csgo_cfg/
+
+INSTRUCTIONS
+----------------------------------------
+Upon 1st usage:
+0. Configure your Steam and CS2/CS:GO settings ONCE
+1. Open CSConfigCopier.exe
+2. Click on "Load" and choose primary Steam account from where your CS2/CS:GO settings will be copied (https://steamid.xyz/ to look up your SteamID)
+3. Click on "Copy all Steam settings", "Copy current CS2 settings"/"Copy current CS:GO settings"
+4. Save the whole folder with all the folders and the .exe file
+
+Upon 2nd usage (reinstalled Windows/Steam/using a different account/playing from a computer club):
+0. Retrieve your saved configurtation folder with CS2ConfigCopier.exe
+1. Open the app
+2. Click on "Paste all Steam settings" and "Paste cs2_cfg"/"Paste csgo_cfg"
+
+FOLDER INFORMATION
+----------------------------------------
+default_configs/
+Stores all default CS2 and CS:GO user-related settings.
+
+You do not need to edit the default_configs/ folder inside cs2_cfg/ or csgo_cfg/.
+The required default configs should be copied by using the program.
+
+additional_configs/
+Stores extra config files that you may want to use, replace, or remove.
+Example configs are included there and will be copied to the game/csgo/cfg folder.
+
+steam_account_settings/
+This folder is created after clicking "Copy all Steam settings".
+It stores Steam settings for all Steam accounts currently used on your PC.
+
+csgo_cfg/
+This folder may also contain CS:GO background files, which you can replace or remove if needed.
+
+cs2_server_cfg/
+If you use this folder, make sure all plugins and server.bat files are configured before copying.
+
+NOTES
+----------------------------------------
+- If you do not need certain files or folders, you can delete them.
+- However, it is best to keep the main folder structure intact and only replace or remove the files you do not want.
+- Do not modify or remove default_configs/ unless you fully understand what you are changing.
